@@ -18,6 +18,7 @@ func Init() *Config {
 	configfile.LoadDotEnv()
 
 	c.Port = r.StringDefault("PORT", "8080")
+	c.DatabaseURL = r.StringDefault("DATABASE_URL", "postgres://user:password@postgres:5432/recommendations?sslmode=disable")
 
 	return &c
 }
