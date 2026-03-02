@@ -44,5 +44,17 @@ services:
         "up"
       ]
 
+  seed:
+    build:
+      context: .
+      dockerfile: cmd/seed/Dockerfile
+    container_name: rec_seed
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgres://user:password@postgres:5432/recommendations?sslmode=disable
+    command: ["./seed"]
+
 volumes:
   postgres_data:
