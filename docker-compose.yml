@@ -56,5 +56,26 @@ services:
       DATABASE_URL: postgres://user:password@postgres:5432/recommendations?sslmode=disable
     command: ["./seed"]
 
+  app:
+    build:
+      context: .
+      dockerfile: cmd/api/Dockerfile
+    container_name: rec_app
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      seed:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgres://user:password@postgres:5432/recommendations?sslmode=disable
+      REDIS_URL: redis:6379
+    ports:
+      - "8080:8080"
+
 volumes:
   postgres_data:
