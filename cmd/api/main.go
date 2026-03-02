@@ -15,7 +15,7 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/saturnooi/recommendation-service/cmd/api/config"
 	"github.com/saturnooi/recommendation-service/internal/adapter/cache"
-	handler "github.com/saturnooi/recommendation-service/internal/adapter/handler/user"
+	"github.com/saturnooi/recommendation-service/internal/adapter/handler"
 	httpadapter "github.com/saturnooi/recommendation-service/internal/adapter/http"
 	"github.com/saturnooi/recommendation-service/internal/adapter/pg"
 	"github.com/saturnooi/recommendation-service/internal/adapter/repository"
@@ -45,8 +45,10 @@ func main() {
 	userRepo := repository.NewUserRepository()
 
 	userUsecase := usecase.NewUserUsecase(userRepo)
+	recommendationUsecase := usecase.NewRecommendationUsecase(userRepo)
 
 	handler.InitUserHandler(e, userUsecase)
+	handler.InitRecommendationHandler(e, recommendationUsecase)
 
 	go func() {
 		if err := e.Start(fmt.Sprintf(":%s", c.Port)); err != nil && err != http.ErrServerClosed {
