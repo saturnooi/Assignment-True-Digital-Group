@@ -1,15 +1,17 @@
-Setup Instructions 
-    This section describes how to set up and run the system using the provided Makefile and docker-compose.yml.
-    The project is fully containerized and requires no manual local dependency installation.
+## Setup Instructions
 
-    Prerequisites
-        Go 1.25
-        Docker & Docker Compose
-        PostgreSQL 15+
-        Redis 7+
-        k6 (for performance testing)
+This section describes how to set up and run the system using the provided `Makefile` and `docker-compose.yml`.  
+The project is fully containerized and requires no manual local dependency installation.
 
-    The Docker Compose file defines the following services:
+### Prerequisites
+- Go 1.25
+- Docker & Docker Compose
+- PostgreSQL 15+
+- Redis 7+
+- k6 (for performance testing)
+
+### The Docker Compose file defines the following services:
+
     | Service  | Description              |
     | -------- | ------------------------ |
     | postgres | PostgreSQL 15 database   |
@@ -18,72 +20,75 @@ Setup Instructions
     | seed     | Populates initial data   |
     | app      | Go API service           |
 
+### Start All Services (Docker Compose)  
+If your Makefile defines shortcuts:
+``` make up ```
+Or directly:
+``` docker-compose up --build ```
+This will:
+- Start PostgreSQL
+- Wait until database is healthy
+- Run migrations
+- Run seed process
+- Start Redis
+- Start API server
 
-    Start All Services (Docker Compose)
-        If your Makefile defines shortcuts:
+API will be available at:
+``` http://localhost:8080 ```
+
+### Running Migrations Manually
+
+If you need to rerun migrations:
+``` make migrate ```
+Equivalent to:
+``` docker-compose up migrate ```
+
+Migration command executed:
+    ```migrate -path=/migrations \-database=postgres://user:password@postgres:5432/recommendations?sslmode=disable \up```
     
-        ``` make up ```
+### Running Seed Manually
 
-        Or directly:
+To repopulate the database:
+``` make seed ``` 
+Equivalent to:
+``` docker-compose up seed ``` 
 
-        ``` docker-compose up --build ```
-
-    This will:
-        * Start PostgreSQL
-        * Wait until database is healthy
-        * Run migrations
-        * Run seed process
-        * Start Redis
-        * Start API server
-    API will be available at:
-    ``` http://localhost:8080 ```
-
-    Running Migrations Manually
-        If you need to rerun migrations:
-        ``` make migrate ```
-        Equivalent to:
-        ``` docker-compose up migrate ```
-        Migration command executed:
-        ``` migrate -path=/migrations \-database=postgres://user:password@postgres:5432/recommendations?sslmode=disable \up```
-    Running Seed Manually
-        To repopulate the database:
-        ``` make seed ``` 
-        Equivalent to:
-        ``` docker-compose up seed ``` 
-    Running Individual Services
-        Start Only Database
-        ``` make db ``` 
-        Equivalent to:
-        ``` docker-compose up -d postgres ``` 
+### Running Individual Services
+Start Only Database
+``` make db ``` 
+Equivalent to:
+``` docker-compose up -d postgres ``` 
         
-        Start Only Redis
-        ``` make redis ``` 
-        Equivalent to:
-        ``` docker-compose up -d redis ``` 
+Start Only Redis
+``` make redis ``` 
+Equivalent to:
+``` docker-compose up -d redis ``` 
         
-        Start Only API
-         ``` make app ``` 
-        Equivalent to:
-        ``` docker-compose up --build app ``` 
+Start Only API
+``` make app ``` 
+Equivalent to:
+``` docker-compose up --build app ``` 
     
-    Why This Setup Is Production-Oriented
-        Healthcheck-based dependency control
-        Isolated migration container
-        Seed container separate from API
-        Restart policy for API (unless-stopped)
-        Persistent PostgreSQL volume
-        Clear separation of concerns
-    This ensures reproducible, deterministic startup across environments.
+### Why This Setup Is Production-Oriented
+- Healthcheck-based dependency control
+- Isolated migration container
+- Seed container separate from API
+- Restart policy for API (unless-stopped)
+- Persistent PostgreSQL volume
+- Clear separation of concerns
 
-Architecture Overview
-    High-Level System Design
-    This system follows a Layered Architecture design, with clear separation between:
-        Delivery layer (HTTP)
-        Business logic layer (Usecase)
-        Infrastructure adapters (Database, Cache, Model)
-        Domain layer (Core entities)
+This ensures reproducible, deterministic startup across environments.
 
-    High-level architecture diagram:
+### Architecture Overview
+High-Level System Design
+
+This system follows a Layered Architecture design, with clear separation between:
+- Delivery layer (HTTP)
+- Business logic layer (Usecase)
+- Infrastructure adapters (Database, Cache, Model)
+- Domain layer (Core entities)
+
+### High-level architecture diagram:
                     ┌──────────────────────┐
                     │      Client (HTTP)   │
                     └──────────┬───────────┘
@@ -100,190 +105,194 @@ Architecture Overview
                                │
             ┌──────────────────┼──────────────────┐
             ▼                  ▼                  ▼
- ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
- │ UserRepository  │  │   ModelClient   │  │ Cache (Redis)   │
- └────────┬────────┘  └────────┬────────┘  └────────┬────────┘
-          ▼                    ▼                    ▼
-   ┌──────────────┐     (Scoring Logic)      ┌──────────────┐
-   │ PostgreSQL   │                          │    Redis     │
-   └──────────────┘                          └──────────────┘
+    ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
+    │ UserRepository  │  │   ModelClient   │  │ Cache (Redis)   │
+    └────────┬────────┘  └────────┬────────┘  └────────┬────────┘
+             ▼                    ▼                    ▼
+    ┌──────────────┐     (Scoring Logic)      ┌──────────────┐
+    │ PostgreSQL   │                          │    Redis     │
+    └──────────────┘                          └──────────────┘
 
-    Architectural Layers
-        Delivery Layer (Handler / HTTP)
-            Location:
-                ```
-                    internal/adapter/handler
-                    internal/adapter/http
-                ```
-            Responsibilities:
-                Receive HTTP requests
-                Validate input parameters
-                Call usecase methods
-                Map application errors to HTTP responses
-                Serialize JSON output
-            The handler does not contain business logic.
+### Architectural Layers
+##### Delivery Layer (Handler / HTTP)
+- Location:
+    ```
+    internal/adapter/handler 
+    internal/adapter/http
+    ```
+- Responsibilities:
+    - Receive HTTP requests
+    - Validate input parameters
+    - Call usecase methods
+    - Map application errors to HTTP responses
+    - Serialize JSON output
+    - The handler does not contain business logic.
 
-    Usecase Layer (Business Logic)
-        ```internal/usecase```
+- Usecase Layer (Business Logic)
+    ```internal/usecase```
     This layer orchestrates the recommendation workflow.
 
-    Domain Layer
+- Domain Layer
         ```internal/domain```
-        Contains core business entities:
-            User
-            Content
-            WatchRecord
-            ScoredContent
-        This layer contains no infrastructure code.
+    - Contains core business entities:
+        - User
+        - Content
+        - WatchRecord
+        - ScoredContent
+        
+    This layer contains no infrastructure code.
         It defines the data structures used across usecase and adapters
 
-    Port Layer (Interface Contracts)
+- Port Layer (Interface Contracts)
     ```internal/port```
-    Defines interfaces:
-        UserRepository
-        ModelClient
-    This allows:
-        Database implementation replacement
-        Model implementation abstraction
-        Easier testing and mocking
+    - Defines interfaces:
+        - UserRepository
+        - ModelClient
+    - This allows:
+        - Database implementation replacement
+        - Model implementation abstraction
+        - Easier testing and mocking
 
-    Infrastructure Layer (Adapters)
+- Infrastructure Layer (Adapters)
     ```internal/adapter```
-    Contains implementations for:
-        PostgreSQL (adapter/pg + adapter/repository)
-        Redis cache (adapter/cache)
-        Model scoring logic (adapter/model)
-        These components integrate with external systems but contain no orchestration logic.
+    - Contains implementations for:
+        - PostgreSQL (adapter/pg + adapter/repository)
+        - Redis cache (adapter/cache)
+        - Model scoring logic (adapter/model)
+        - These components integrate with external systems but contain no orchestration logic.
 
-    Data Flow Through the System
-        Single Recommendation Flow
-            1.Client calls:
+- Data Flow Through the System
+    - Single Recommendation Flow
+        1.Client calls:
                 ```GET /users/{id}/recommendations?limit=10```
-            2.Handler validates request
-            3.Usecase performs cache lookup in Redis:
-                If hit → return cached response
-                If miss → continue
-            4.Repository queries PostgreSQL for:
-                User data
-                Watch history
-                Candidate content
-            5.Usecase builds user preference profile
-            6.ModelClient scores candidate content
-            7.Results are:
-                Sorted by score
-                Limited to requested size
-            8.Response is cached (TTL: 10 minutes)
-            9.JSON response returned
-        Batch Recommendation Flow
+        2.Handler validates request
+        3.Usecase performs cache lookup in Redis:
+            - If hit → return cached response
+            - If miss → continue
+        4.Repository queries PostgreSQL for:
+            - User data
+            - Watch history
+            - Candidate content
+        5.Usecase builds user preference profile
+        6.ModelClient scores candidate content
+        7.Results are:
+            - Sorted by score
+            - Limited to requested size
+        8.Response is cached (TTL: 10 minutes)
+        9.JSON response returned
+    - Batch Recommendation Flow
             1.Client calls:
                 ```GET /recommendations/batch?page=1&limit=20```
             2.Usecase:
-                Fetches paginated user IDs
-                Bulk loads watch histories
-                Loads candidate content once
+                - Fetches paginated user IDs
+                - Bulk loads watch histories
+                - Loads candidate content once
             3.Bounded worker pool processes users concurrently
             4.Each worker:
-                Builds preference
-                Calls ModelClient
-                Sorts results
+                - Builds preference
+                - Calls ModelClient
+                - Sorts results
             5.Aggregate success and failure
             6.Return structured batch response
 
-    How the Recommendation Model Integrates with Database Queries
-    1.Repository fetches structured domain data from PostgreSQL:
-        User profile
-        Watch history
-        Content metadata
-    2.Usecase prepares:
-        Genre preference map
-        Candidate content slice
-    3.ModelClient receives:
-    ```
+    - How the Recommendation Model Integrates with Database Queries
+        - Repository fetches structured domain data from PostgreSQL:
+            - User profile
+            - Watch history
+            - Content metadata
+        - Usecase prepares:
+            - Genre preference map
+            - Candidate content slice
+    
+        - ModelClient receives :
+        ```
         ScoreCandidates(
             user domain.User,
             candidates []domain.Content,
-            preference map[string]float64,
+            preference map[string]float64
         )
-    ```
-    4.Model applies scoring algorithm:
-        Popularity weight (40%)
-        Genre match weight (35%)
-        Recency boost (15%)
-        Random noise (10%)
-        Simulated latency (30–50ms)
-        Simulated failure (1–2%)
-    5.Model returns scored results to usecase.
-    6.Usecase handles sorting and formatting.
+        ```
+        - Model applies scoring algorithm:
+            - Popularity weight (40%)
+            - Genre match weight (35%)
+            - Recency boost (15%)
+            - Random noise (10%)
+            - Simulated latency (30–50ms)
+            - Simulated failure (1–2%)
+        - Model returns scored results to usecase.
+        - Usecase handles sorting and formatting.
 
-Design Decisions
-    Caching Strategy and TTL Rationale
-        Cache Strategy
-            The system uses a cache-first approach for the single recommendation endpoint.
+### Design Decisions
+##### Caching Strategy and TTL Rationale
+###### Cache Strategy
+The system uses a cache-first approach for the single recommendation endpoint.
             
-            Cache key format:
+Cache key format:
             ```rec:user:{user_id}:limit:{limit} ```
-            Design considerations:
-                Include user_id to isolate personalization.
-                Include limit to avoid incorrect reuse of differently-sized responses.
-                Store full JSON response to avoid recomputation and re-sorting.
+            
+###### Design considerations:
+- Include user_id to isolate personalization.
+- Include limit to avoid incorrect reuse of differently-sized responses.
+- Store full JSON response to avoid recomputation and re-sorting.
         
-        Why Cache at Usecase Level?
-        Caching is handled during orchestration because:
-            The usecase understands request boundaries.
-            It avoids redundant model scoring.
-            It prevents unnecessary database reads.
-        This approach reduces:
-            Database load
-            Model invocation frequency
-            CPU usage
+###### Why Cache at Usecase Level?
+- Caching is handled during orchestration because:
+    - The usecase understands request boundaries.
+    - It avoids redundant model scoring.
+    - It prevents unnecessary database reads.
+- This approach reduces:
+    - Database load
+    - Model invocation frequency
+    - CPU usage
 
-        TTL Rationale (10 minutes)
-        TTL is set to 10 minutes based on:
-            Recommendation freshness requirements
-            Avoiding excessive recomputation
-            Reducing Redis memory footprint
-        Balancing staleness vs performance
-        Trade-off:
-            Short TTL → fresher results, higher load
-            Long TTL → better performance, possible staleness
-        For this dataset and traffic profile, 10 minutes provides a good balance
-    Concurrency Control Approach
-        Concurrency is applied in the batch endpoint only.
+###### TTL Rationale (10 minutes)
+TTL is set to 10 minutes based on:
+- Recommendation freshness requirements
+    - Avoiding excessive recomputation
+    - Reducing Redis memory footprint
+-  Balancing staleness vs performance
+-  Trade-off:
+    - Short TTL → fresher results, higher load
+    - Long TTL → better performance, possible staleness
+For this dataset and traffic profile, 10 minutes provides a good balance
+
+###### Concurrency Control Approach
+Concurrency is applied in the batch endpoint only.
+
+###### Why Not Parallelize Single Endpoint?
+Single recommendation is already lightweight and cache-optimized.
+
+###### Parallelization would introduce:
+- Overhead
+- Goroutine churn
+- Increased complexity
+
+###### Worker Pool Design (Batch Endpoint)
+The batch endpoint uses a bounded worker pool:
+    ```workers = min(limit, runtime.NumCPU() * 2)```
+            
+-   Rationale:
+    -   Prevent unbounded goroutine creation
+    -   Avoid CPU thrashing
+    -   Maintain predictable memory usage
+    -   Match workload to available CPU cores
+-   Each worker:
+    -   Processes one user at a time
+    -   Applies per-user timeout
+    -   Reports result to aggregation channel
         
-        Why Not Parallelize Single Endpoint?
-            Single recommendation is already lightweight and cache-optimized.
-            Parallelization would introduce:
-                Overhead
-                Goroutine churn
-                Increased complexity
+-   Error Handling Philosophy
+    -   Error handling is layered and categorized.
+    -   Categories of Errors
+        -   Validation errors (bad request)
+        -   Not found errors (user does not exist)
+        -   Model failure
+        -   Timeout errors
+        -   Infrastructure errors (DB / Redis)
 
-        Worker Pool Design (Batch Endpoint)
-            The batch endpoint uses a bounded worker pool:
-
-            ```workers = min(limit, runtime.NumCPU() * 2)```
-
-            Rationale:
-                Prevent unbounded goroutine creation
-                Avoid CPU thrashing
-                Maintain predictable memory usage
-                Match workload to available CPU cores
-            Each worker:
-                Processes one user at a time
-                Applies per-user timeout
-                Reports result to aggregation channel
-        
-        Error Handling Philosophy
-            Error handling is layered and categorized.
-            Categories of Errors
-                Validation errors (bad request)
-                Not found errors (user does not exist)
-                Model failure
-                Timeout errors
-                Infrastructure errors (DB / Redis)
-
-Performance Results
-    Performance testing was conducted using k6 under sustained load for 2 minutes per scenario.
-    Each test used a constant arrival rate of 200 requests per second to simulate steady production traffic.
+###### Performance Results
+Performance testing was conducted using k6 under sustained load for 2 minutes per scenario.
+Each test used a constant arrival rate of 200 requests per second to simulate steady production traffic.
     
     Cache Endpoint Performance
         Test Configuration
@@ -299,17 +308,16 @@ Performance Results
         | Max         | ~511 ms   |
         | Error Rate  | ~0.12%    |
 
-        Analysis
-            The average latency of ~4 ms confirms that Redis cache hits significantly reduce response time by bypassing:
-                Model scoring
-                Database reads
-                Sorting operations
-            The P95 below 10 ms indicates stable latency distribution under sustained load.
-            The small error rate (~0.12%) is within acceptable threshold (<1%) and primarily attributed to:
-                Simulated model failure on rare cache misses
-                Transient timeout conditions
-            The system demonstrates strong I/O-bound performance in cache-hit scenarios.
-    
+    Analysis
+    The average latency of ~4 ms confirms that Redis cache hits significantly reduce response time by bypassing:
+        Model scoring
+        Database reads
+        Sorting operations
+    The P95 below 10 ms indicates stable latency distribution under sustained load.
+    The small error rate (~0.12%) is within acceptable threshold (<1%) and primarily attributed to:
+        Simulated model failure on rare cache misses
+        Transient timeout conditions
+    The system demonstrates strong I/O-bound performance in cache-hit scenarios.
     Single Recommendation Endpoint
         Test Configuration
             * 200 requests/sec
@@ -367,30 +375,26 @@ Performance Results
             Worker pool prevents uncontrolled resource usage
         The system demonstrates production-ready performance characteristics and scalable architecture under moderate concurrent load.
 
-Trade-offs and Future Improvements
-    Known Limitations
-        1. Heuristic-Based Scoring
-            Current recommendation logic uses weighted rules (popularity, genre match, recency, randomness).
-            It is not a real machine learning model, so personalization depth is limited.
-
-        2. In-Memory Scoring
-            All candidate content is loaded and scored in memory.
-            This works well for moderate datasets but would not scale efficiently for millions of items.
-
-        3. TTL-Based Cache Only
-            Cache invalidation relies on a fixed 10-minute TTL.
-            User behavior changes do not immediately refresh recommendations.
-
-        4. Single API Instance
-            The system currently runs as a single API container.
-            Horizontal scaling and load balancing are not yet implemented.
-    Scalability Considerations
+#### Trade-offs and Future Improvements
+    - Known Limitations
+        -   Heuristic-Based Scoring
+                - Current recommendation logic uses weighted rules (popularity, genre match, recency, randomness).
+                -   It is not a real machine learning model, so personalization depth is limited.
+        -   In-Memory Scoring
+            - All candidate content is loaded and scored in memory.
+            - This works well for moderate datasets but would not scale efficiently for millions of items.
+        - TTL-Based Cache Only
+            -   Cache invalidation relies on a fixed 10-minute TTL.
+            -   User behavior changes do not immediately refresh recommendations.
+        - Single API Instance
+            - The system currently runs as a single API container.
+            - Horizontal scaling and load balancing are not yet implemented.
+    - Scalability Considerations
         API Layer can scale horizontally behind a load balancer.
         Redis already supports centralized caching for multi-instance deployments.
         PostgreSQL could use read replicas or partitioning for large datasets.
         Batch processing already uses bounded concurrency to prevent CPU overload.
-
-    Summary
+Summary
     The current implementation prioritizes: 
         Simplicity
         Predictable performance
@@ -398,25 +402,33 @@ Trade-offs and Future Improvements
         Controlled concurrency
         While not fully production-scale for massive traffic, the architecture is extensible and ready to evolve into a distributed, ML-driven system.
 
-Final Summary
-    This recommendation service was designed with clarity, modularity, and performance in mind.
-    The system demonstrates:
-        Clean separation between delivery, business logic, and infrastructure
-        Interface-driven design for extensibility and testability
-        Cache-first optimization strategy
-        Bounded concurrency for controlled CPU utilization
-        Bulk-loading strategy to prevent N+1 query issues
-        Stable performance under sustained load (200 req/sec)
-    Performance testing confirms:
-        Low latency in cache-hit scenarios (~4–5 ms average)
-        Stable distribution under mixed workloads
-        Controlled resource usage via worker pool
-        Error rate consistently below defined thresholds
-    While the current implementation uses a heuristic scoring approach and runs as a single instance, the architecture is intentionally extensible. It can evolve toward:
-        ML-driven ranking
-        Horizontal scaling
-        Distributed deployment
-        Event-driven cache invalidation
-        Advanced observability and monitoring
-    Overall, the system balances simplicity and production-readiness.
-    It provides a solid architectural foundation that can scale and adapt to more advanced requirements.
+## Final Summary
+
+This recommendation service was designed with clarity, modularity, and performance in mind.
+
+### The system demonstrates:
+
+- Clean separation between delivery, business logic, and infrastructure
+- Interface-driven design for extensibility and testability
+- Cache-first optimization strategy
+- Bounded concurrency for controlled CPU utilization
+- Bulk-loading strategy to prevent N+1 query issues
+- Stable performance under sustained load (200 req/sec)
+
+### Performance testing confirms:
+
+- Low latency in cache-hit scenarios (~4–5 ms average)
+- Stable distribution under mixed workloads
+- Controlled resource usage via worker pool
+- Error rate consistently below defined thresholds
+
+While the current implementation uses a heuristic scoring approach and runs as a single instance, the architecture is intentionally extensible. It can evolve toward:
+
+- ML-driven ranking
+- Horizontal scaling
+- Distributed deployment
+- Event-driven cache invalidation
+- Advanced observability and monitoring
+
+Overall, the system balances simplicity and production-readiness.  
+It provides a solid architectural foundation that can scale and adapt to more advanced requirements.
