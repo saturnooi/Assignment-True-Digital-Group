@@ -14,6 +14,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/saturnooi/recommendation-service/cmd/api/config"
+	"github.com/saturnooi/recommendation-service/internal/adapter/cache"
 	httpadapter "github.com/saturnooi/recommendation-service/internal/adapter/http"
 	"github.com/saturnooi/recommendation-service/internal/adapter/pg"
 )
@@ -25,11 +26,15 @@ func main() {
 	db, ctx := pg.NewWithContext(ctx, c.DatabaseURL)
 	defer db.Close()
 
+	rc := cache.New(ctx, c.RedisURL, c.RedisPassword, c.RedisDB)
+	defer rc.Close()
+
 	e := echo.New()
 	e.HideBanner = true
 	e.HidePort = true
 
 	e.Use(echo.WrapMiddleware(pgctx.Middleware(db)))
+	e.Use(echo.WrapMiddleware(cache.Middleware(rc)))
 
 	e.Use(middleware.Recover())
 	e.HTTPErrorHandler = httpadapter.ErrorHandler
