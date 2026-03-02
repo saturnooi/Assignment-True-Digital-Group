@@ -6,7 +6,6 @@ import (
 	"log"
 	"log/slog"
 	"runtime"
-	"time"
 
 	"contrib.go.opencensus.io/integrations/ocsql"
 	"github.com/acoshift/pgsql/pgctx"
@@ -37,10 +36,4 @@ func New(uri string) *sql.DB {
 func NewWithContext(ctx context.Context, uri string) (*sql.DB, context.Context) {
 	db := New(uri)
 	return db, pgctx.NewContext(ctx, db)
-}
-
-type TxOptions struct {
-	MaxAttempts int
-	Interval    time.Duration
-	Isolation   sql.IsolationLevel
 }

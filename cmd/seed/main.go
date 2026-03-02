@@ -7,8 +7,11 @@ import (
 	"log"
 	"math"
 	"math/rand"
+	"strings"
 	"time"
 
+	"github.com/acoshift/pgsql"
+	"github.com/acoshift/pgsql/pgctx"
 	_ "github.com/lib/pq"
 	"github.com/saturnooi/recommendation-service/cmd/seed/config"
 )
@@ -20,7 +23,7 @@ const (
 )
 
 type ContentItem struct {
-	ID         int
+	ID         int64
 	Popularity float64
 }
 
@@ -42,18 +45,30 @@ func main() {
 		log.Fatal(err)
 	}
 
-	if err := truncateTables(ctx, db); err != nil {
+	ctx = pgctx.NewContext(ctx, db)
+
+	if err := truncateTables(ctx); err != nil {
 		log.Fatal(err)
 	}
 
-	users := seedUsers(ctx, db, r, userCount)
-	content := seedContent(ctx, db, r, contentCount)
-	seedWatchHistory(ctx, db, r, users, content, watchHistoryCount)
+	users, err := seedUsers(ctx, r, userCount)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	content, err := seedContent(ctx, r, contentCount)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if err := seedWatchHistory(ctx, r, users, content, watchHistoryCount); err != nil {
+		log.Fatal(err)
+	}
 
 	log.Println("Seeding completed successfully")
 }
 
-func truncateTables(ctx context.Context, db *sql.DB) error {
+func truncateTables(ctx context.Context) error {
 	queries := []string{
 		"TRUNCATE user_watch_history RESTART IDENTITY CASCADE",
 		"TRUNCATE content RESTART IDENTITY CASCADE",
@@ -61,48 +76,75 @@ func truncateTables(ctx context.Context, db *sql.DB) error {
 	}
 
 	for _, q := range queries {
-		if _, err := db.ExecContext(ctx, q); err != nil {
+		if _, err := pgctx.Exec(ctx, q); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func seedUsers(ctx context.Context, db *sql.DB, r *rand.Rand, n int) []int {
-	tx, _ := db.BeginTx(ctx, nil)
-	defer tx.Rollback()
-
-	stmt, _ := tx.PrepareContext(ctx,
-		"INSERT INTO users(age, country, subscription_type) VALUES($1,$2,$3) RETURNING id")
-	defer stmt.Close()
+func seedUsers(ctx context.Context, r *rand.Rand, n int) ([]int64, error) {
+	const batchSize = 10000
 
 	countries := []string{"US", "GB", "CA", "AU", "DE", "TH", "JP", "FR", "SG", "KR"}
 	subscriptions := []string{"free", "basic", "premium"}
 	subWeights := []float64{0.5, 0.3, 0.2}
+	ids := make([]int64, 0, n)
 
-	ids := make([]int, 0, n)
+	for start := 0; start < n; start += batchSize {
+		end := start + batchSize
+		if end > n {
+			end = n
+		}
 
-	for i := 0; i < n; i++ {
-		age := r.Intn(47) + 18
-		country := countries[r.Intn(len(countries))]
-		sub := weightedChoice(r, subscriptions, subWeights)
+		valueStrings := make([]string, 0, end-start)
+		valueArgs := make([]any, 0, (end-start)*3)
 
-		var id int
-		_ = stmt.QueryRowContext(ctx, age, country, sub).Scan(&id)
-		ids = append(ids, id)
+		argPos := 1
+
+		for i := start; i < end; i++ {
+
+			age := r.Intn(47) + 18
+			country := countries[r.Intn(len(countries))]
+			sub := weightedChoice(r, subscriptions, subWeights)
+
+			valueStrings = append(valueStrings,
+				fmt.Sprintf("($%d,$%d,$%d)", argPos, argPos+1, argPos+2))
+
+			valueArgs = append(valueArgs, age, country, sub)
+
+			argPos += 3
+		}
+
+		query := fmt.Sprintf(`
+			INSERT INTO users(age, country, subscription_type)
+			VALUES %s
+			RETURNING id
+		`, strings.Join(valueStrings, ","))
+
+		err := pgctx.Iter(
+			ctx,
+			func(scan pgsql.Scanner) error {
+				var id int64
+				if err := scan(&id); err != nil {
+					return err
+				}
+				ids = append(ids, id)
+				return nil
+			},
+			query,
+			valueArgs...,
+		)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	_ = tx.Commit()
-	return ids
+	return ids, nil
 }
 
-func seedContent(ctx context.Context, db *sql.DB, r *rand.Rand, n int) []ContentItem {
-	tx, _ := db.BeginTx(ctx, nil)
-	defer tx.Rollback()
-
-	stmt, _ := tx.PrepareContext(ctx,
-		"INSERT INTO content(title, genre, popularity_score, created_at) VALUES($1,$2,$3,$4) RETURNING id")
-	defer stmt.Close()
+func seedContent(ctx context.Context, r *rand.Rand, n int) ([]ContentItem, error) {
+	const batchSize = 10000
 
 	genres := []string{
 		"action", "drama", "comedy", "thriller", "documentary",
@@ -111,53 +153,118 @@ func seedContent(ctx context.Context, db *sql.DB, r *rand.Rand, n int) []Content
 
 	items := make([]ContentItem, 0, n)
 
-	for i := 0; i < n; i++ {
-		title := fmt.Sprintf("Movie %d", i+1)
-		genre := genres[r.Intn(len(genres))]
+	baseTime := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
-		popularity := math.Pow(r.Float64(), 2)
+	for start := 0; start < n; start += batchSize {
+		end := start + batchSize
+		if end > n {
+			end = n
+		}
 
-		createdAt := time.Now().AddDate(0, 0, -r.Intn(365))
+		valueStrings := make([]string, 0, end-start)
+		valueArgs := make([]any, 0, (end-start)*4)
 
-		var id int
-		_ = stmt.QueryRowContext(ctx, title, genre, popularity, createdAt).Scan(&id)
+		argPos := 1
 
-		items = append(items, ContentItem{
-			ID:         id,
-			Popularity: popularity,
-		})
+		for i := start; i < end; i++ {
+
+			title := fmt.Sprintf("Movie %d", i+1)
+			genre := genres[r.Intn(len(genres))]
+
+			popularity := math.Pow(r.Float64(), 2)
+
+			createdAt := baseTime.AddDate(0, 0, -r.Intn(365))
+
+			valueStrings = append(valueStrings,
+				fmt.Sprintf("($%d,$%d,$%d,$%d)", argPos, argPos+1, argPos+2, argPos+3))
+
+			valueArgs = append(valueArgs, title, genre, popularity, createdAt)
+
+			argPos += 4
+		}
+
+		query := fmt.Sprintf(`
+			INSERT INTO content(title, genre, popularity_score, created_at)
+			VALUES %s
+			RETURNING id, popularity_score
+		`, strings.Join(valueStrings, ","))
+
+		err := pgctx.Iter(
+			ctx,
+			func(scan pgsql.Scanner) error {
+				var id int64
+				var popularity float64
+
+				if err := scan(&id, &popularity); err != nil {
+					return err
+				}
+
+				items = append(items, ContentItem{
+					ID:         id,
+					Popularity: popularity,
+				})
+				return nil
+			},
+			query,
+			valueArgs...,
+		)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	_ = tx.Commit()
-	return items
+	return items, nil
 }
 
-func seedWatchHistory(ctx context.Context, db *sql.DB, r *rand.Rand, users []int, content []ContentItem, n int) {
-	tx, _ := db.BeginTx(ctx, nil)
-	defer tx.Rollback()
+func seedWatchHistory(ctx context.Context, r *rand.Rand, users []int64, content []ContentItem, n int) error {
+	const batchSize = 10000
 
-	stmt, _ := tx.PrepareContext(ctx,
-		"INSERT INTO user_watch_history(user_id, content_id, watched_at) VALUES($1,$2,$3)")
-	defer stmt.Close()
-
+	baseTime := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	totalWeight := 0.0
 	for _, c := range content {
 		totalWeight += c.Popularity
 	}
 
-	for i := 0; i < n; i++ {
-		userID := users[r.Intn(len(users))]
-		contentID := weightedContentChoice(r, content, totalWeight)
+	for start := 0; start < n; start += batchSize {
+		end := start + batchSize
+		if end > n {
+			end = n
+		}
 
-		watchedAt := time.Now().Add(-time.Duration(r.Intn(1000)) * time.Hour)
+		valueStrings := make([]string, 0, end-start)
+		valueArgs := make([]any, 0, (end-start)*3)
 
-		_, _ = stmt.ExecContext(ctx, userID, contentID, watchedAt)
+		argPos := 1
+
+		for i := start; i < end; i++ {
+
+			userID := users[r.Intn(len(users))]
+			contentID := weightedContentChoice(r, content, totalWeight)
+
+			watchedAt := baseTime.Add(-time.Duration(r.Intn(1000)) * time.Hour)
+
+			valueStrings = append(valueStrings,
+				fmt.Sprintf("($%d,$%d,$%d)", argPos, argPos+1, argPos+2))
+
+			valueArgs = append(valueArgs, userID, contentID, watchedAt)
+
+			argPos += 3
+		}
+
+		query := fmt.Sprintf(`
+			INSERT INTO user_watch_history(user_id, content_id, watched_at)
+			VALUES %s
+		`, strings.Join(valueStrings, ","))
+
+		if _, err := pgctx.Exec(ctx, query, valueArgs...); err != nil {
+			return err
+		}
 	}
 
-	_ = tx.Commit()
+	return nil
 }
 
-func weightedContentChoice(r *rand.Rand, content []ContentItem, total float64) int {
+func weightedContentChoice(r *rand.Rand, content []ContentItem, total float64) int64 {
 	threshold := r.Float64() * total
 	cumulative := 0.0
 
