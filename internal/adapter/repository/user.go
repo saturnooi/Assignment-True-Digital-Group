@@ -9,7 +9,7 @@ import (
 	"github.com/acoshift/pgsql"
 	"github.com/acoshift/pgsql/pgctx"
 	"github.com/lib/pq"
-	"github.com/saturnooi/recommendation-service/internal/domain/user"
+	"github.com/saturnooi/recommendation-service/internal/domain"
 	"github.com/saturnooi/recommendation-service/internal/port"
 )
 
@@ -19,8 +19,8 @@ func NewUserRepository() port.UserRepository {
 	return &userRepo{}
 }
 
-func (r *userRepo) GetUserByID(ctx context.Context, id int64) (*user.User, error) {
-	var result user.User
+func (r *userRepo) GetUserByID(ctx context.Context, id int64) (*domain.User, error) {
+	var result domain.User
 
 	err := pgctx.QueryRow(ctx,
 		`SELECT 
@@ -50,13 +50,13 @@ func (r *userRepo) GetUserByID(ctx context.Context, id int64) (*user.User, error
 	return &result, err
 }
 
-func (r *userRepo) GetUserWatchHistory(ctx context.Context, id int64) ([]user.WatchRecord, error) {
-	var results []user.WatchRecord
+func (r *userRepo) GetUserWatchHistory(ctx context.Context, id int64) ([]domain.WatchRecord, error) {
+	var results []domain.WatchRecord
 
 	err := pgctx.Iter(
 		ctx,
 		func(scan pgsql.Scanner) error {
-			var x user.WatchRecord
+			var x domain.WatchRecord
 			err := scan(
 				&x.Genre,
 				&x.WatchedAt,
@@ -90,13 +90,13 @@ func (r *userRepo) GetUserWatchHistory(ctx context.Context, id int64) ([]user.Wa
 	return results, nil
 }
 
-func (r *userRepo) GetUnwatchedContent(ctx context.Context, id int64) ([]user.Content, error) {
-	var results []user.Content
+func (r *userRepo) GetUnwatchedContent(ctx context.Context, id int64) ([]domain.Content, error) {
+	var results []domain.Content
 
 	err := pgctx.Iter(
 		ctx,
 		func(scan pgsql.Scanner) error {
-			var x user.Content
+			var x domain.Content
 			err := scan(
 				&x.ID,
 				&x.Title,
@@ -167,10 +167,10 @@ func (r *userRepo) GetUserIDsPaginated(ctx context.Context, limit, offset int) (
 	return ids, total, nil
 }
 
-func (r *userRepo) GetWatchHistoryByUserIDs(ctx context.Context, userIDs []int64) (map[int64][]user.WatchRecord, error) {
+func (r *userRepo) GetWatchHistoryByUserIDs(ctx context.Context, userIDs []int64) (map[int64][]domain.WatchRecord, error) {
 
 	if len(userIDs) == 0 {
-		return map[int64][]user.WatchRecord{}, nil
+		return map[int64][]domain.WatchRecord{}, nil
 	}
 
 	query := `
@@ -189,7 +189,7 @@ func (r *userRepo) GetWatchHistoryByUserIDs(ctx context.Context, userIDs []int64
             uwh.user_id, uwh.watched_at DESC
     `
 
-	results := make(map[int64][]user.WatchRecord)
+	results := make(map[int64][]domain.WatchRecord)
 
 	err := pgctx.Iter(ctx, func(scan pgsql.Scanner) error {
 		var userID int64
@@ -204,7 +204,7 @@ func (r *userRepo) GetWatchHistoryByUserIDs(ctx context.Context, userIDs []int64
 		); err != nil {
 			return err
 		}
-		results[userID] = append(results[userID], user.WatchRecord{
+		results[userID] = append(results[userID], domain.WatchRecord{
 			ContentID: contentID,
 			Genre:     genre,
 			WatchedAt: watchedAt,
@@ -221,7 +221,7 @@ func (r *userRepo) GetWatchHistoryByUserIDs(ctx context.Context, userIDs []int64
 	return results, nil
 }
 
-func (r *userRepo) GetTopContent(ctx context.Context) ([]user.Content, error) {
+func (r *userRepo) GetTopContent(ctx context.Context) ([]domain.Content, error) {
 
 	query := `
         SELECT id, title, genre, popularity_score, created_at
@@ -230,10 +230,10 @@ func (r *userRepo) GetTopContent(ctx context.Context) ([]user.Content, error) {
         LIMIT 100
     `
 
-	var results []user.Content
+	var results []domain.Content
 
 	err := pgctx.Iter(ctx, func(scan pgsql.Scanner) error {
-		var c user.Content
+		var c domain.Content
 		if err := scan(
 			&c.ID,
 			&c.Title,

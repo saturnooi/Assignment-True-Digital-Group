@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/saturnooi/recommendation-service/internal/adapter/cache"
-	"github.com/saturnooi/recommendation-service/internal/domain/user"
+	"github.com/saturnooi/recommendation-service/internal/domain"
 	"github.com/saturnooi/recommendation-service/internal/errors/codes"
 	"github.com/saturnooi/recommendation-service/internal/errors/httperr"
 	"github.com/saturnooi/recommendation-service/internal/port"
@@ -21,14 +21,16 @@ type UserUsecase interface {
 }
 
 type userUsecase struct {
-	repo port.UserRepository
-	rng  *rand.Rand
+	repo  port.UserRepository
+	model port.ModelClient
+	rng   *rand.Rand
 }
 
-func NewUserUsecase(r port.UserRepository) UserUsecase {
+func NewUserUsecase(r port.UserRepository, model port.ModelClient) UserUsecase {
 	return &userUsecase{
-		repo: r,
-		rng:  rand.New(rand.NewSource(time.Now().UnixNano())),
+		repo:  r,
+		model: model,
+		rng:   rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 }
 
@@ -97,26 +99,21 @@ func (u *userUsecase) GenerateRecommendations(ctx context.Context, id int64, lim
 		return nil, err
 	}
 
-	delay := time.Duration(30+u.rng.Intn(21)) * time.Millisecond
-
-	select {
-	case <-time.After(delay):
-	case <-ctx.Done():
-		return nil, httperr.GatewayTimeout(
-			codes.RequestTimeout,
-			"Recommendation request timed out",
-		)
+	scored, err := u.model.ScoreCandidates(*userObj, candidates, pref)
+	if err != nil {
+		return nil, err
 	}
 
-	if u.rng.Float64() < 0.015 {
-		return nil, httperr.ServiceUnavailable(
-			codes.ModelUnavailable,
-			"Recommendation model is temporarily unavailable",
-		)
+	sort.Slice(scored, func(i, j int) bool {
+		return scored[i].Score > scored[j].Score
+	})
+
+	if len(scored) > limit {
+		scored = scored[:limit]
 	}
 
-	var recs []Recommendation
-	for _, c := range candidates {
+	recs := make([]Recommendation, 0, len(scored))
+	for _, s := range scored {
 		if ctx.Err() != nil {
 			return nil, httperr.GatewayTimeout(
 				codes.RequestTimeout,
@@ -124,22 +121,13 @@ func (u *userUsecase) GenerateRecommendations(ctx context.Context, id int64, lim
 			)
 		}
 
-		score := u.calculateScore(c, pref)
 		recs = append(recs, Recommendation{
-			ContentID:       c.ID,
-			Title:           c.Title,
-			Genre:           c.Genre,
-			PopularityScore: c.PopularityScore,
-			Score:           score,
+			ContentID:       s.Content.ID,
+			Title:           s.Content.Title,
+			Genre:           s.Content.Genre,
+			PopularityScore: s.Content.PopularityScore,
+			Score:           s.Score,
 		})
-	}
-
-	sort.Slice(recs, func(i, j int) bool {
-		return recs[i].Score > recs[j].Score
-	})
-
-	if len(recs) > limit {
-		recs = recs[:limit]
 	}
 
 	response := GenerateRecommendationsResponse{
@@ -158,7 +146,7 @@ func (u *userUsecase) GenerateRecommendations(ctx context.Context, id int64, lim
 	return &response, nil
 }
 
-func buildGenrePreference(history []user.WatchRecord) map[string]float64 {
+func buildGenrePreference(history []domain.WatchRecord) map[string]float64 {
 	counts := map[string]int{}
 	total := 0
 
@@ -176,23 +164,4 @@ func buildGenrePreference(history []user.WatchRecord) map[string]float64 {
 		result[k] = float64(v) / float64(total)
 	}
 	return result
-}
-
-func (u *userUsecase) calculateScore(c user.Content, pref map[string]float64) float64 {
-
-	popularity := c.PopularityScore * 0.4
-
-	genreWeight := 0.1
-	if v, ok := pref[c.Genre]; ok {
-		genreWeight = v
-	}
-	genreComponent := genreWeight * 0.35
-
-	days := time.Since(c.CreatedAt).Hours() / 24
-	recencyFactor := 1 / (1 + days/365)
-	recencyComponent := recencyFactor * 0.15
-
-	randomNoise := (u.rng.Float64()*0.1 - 0.05) * 0.1
-
-	return popularity + genreComponent + recencyComponent + randomNoise
 }

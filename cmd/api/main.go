@@ -17,6 +17,7 @@ import (
 	"github.com/saturnooi/recommendation-service/internal/adapter/cache"
 	"github.com/saturnooi/recommendation-service/internal/adapter/handler"
 	httpadapter "github.com/saturnooi/recommendation-service/internal/adapter/http"
+	"github.com/saturnooi/recommendation-service/internal/adapter/model"
 	"github.com/saturnooi/recommendation-service/internal/adapter/pg"
 	"github.com/saturnooi/recommendation-service/internal/adapter/repository"
 	"github.com/saturnooi/recommendation-service/internal/usecase"
@@ -43,9 +44,9 @@ func main() {
 	e.HTTPErrorHandler = httpadapter.ErrorHandler
 
 	userRepo := repository.NewUserRepository()
-
-	userUsecase := usecase.NewUserUsecase(userRepo)
-	recommendationUsecase := usecase.NewRecommendationUsecase(userRepo)
+	modelClient := model.NewScoringClient()
+	userUsecase := usecase.NewUserUsecase(userRepo, modelClient)
+	recommendationUsecase := usecase.NewRecommendationUsecase(userRepo, modelClient)
 
 	handler.InitUserHandler(e, userUsecase)
 	handler.InitRecommendationHandler(e, recommendationUsecase)

@@ -2,13 +2,12 @@ package usecase
 
 import (
 	"context"
-	"math/rand"
 	"runtime"
 	"sort"
 	"sync"
 	"time"
 
-	"github.com/saturnooi/recommendation-service/internal/domain/user"
+	"github.com/saturnooi/recommendation-service/internal/domain"
 	"github.com/saturnooi/recommendation-service/internal/port"
 )
 
@@ -17,16 +16,14 @@ type RecommendationUsecase interface {
 }
 
 type recommendationUsecase struct {
-	repo    port.UserRepository
-	rng     *rand.Rand
-	workers int
+	repo  port.UserRepository
+	model port.ModelClient
 }
 
-func NewRecommendationUsecase(r port.UserRepository) RecommendationUsecase {
+func NewRecommendationUsecase(r port.UserRepository, model port.ModelClient) RecommendationUsecase {
 	return &recommendationUsecase{
-		repo:    r,
-		workers: 8,
-		rng:     rand.New(rand.NewSource(time.Now().UnixNano())),
+		repo:  r,
+		model: model,
 	}
 }
 
@@ -67,8 +64,6 @@ func (b *recommendationUsecase) GenerateBatch(ctx context.Context, page, limit i
 
 	offset := (page - 1) * limit
 
-	b.workers = min(limit, runtime.NumCPU()*2)
-
 	userIDs, totalUsers, err := b.repo.GetUserIDsPaginated(ctx, limit, offset)
 	if err != nil {
 		return nil, err
@@ -84,18 +79,18 @@ func (b *recommendationUsecase) GenerateBatch(ctx context.Context, page, limit i
 		return nil, err
 	}
 
+	workers := min(limit, runtime.NumCPU()*2)
+
 	jobs := make(chan int64)
-	results := make(chan BatchResult)
+	results := make(chan BatchResult, len(userIDs))
 
 	var wg sync.WaitGroup
 
-	for i := 0; i < b.workers; i++ {
+	for i := 0; i < workers; i++ {
 		wg.Add(1)
 
 		go func() {
 			defer wg.Done()
-
-			localRng := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 			for {
 				select {
@@ -107,34 +102,43 @@ func (b *recommendationUsecase) GenerateBatch(ctx context.Context, page, limit i
 					}
 
 					history := historyMap[userID]
-					watchedSet := buildWatchedSet(history)
 					pref := buildGenrePreference(history)
 
-					var recs []Recommendation
+					user := domain.User{ID: userID}
 
-					for _, c := range candidates {
+					scored, err := b.model.ScoreCandidates(
+						user,
+						candidates,
+						pref,
+					)
 
-						if _, ok := watchedSet[c.ID]; ok {
-							continue
+					if err != nil {
+						results <- BatchResult{
+							UserID:  userID,
+							Status:  "failed",
+							Error:   "model_unavailable",
+							Message: err.Error(),
 						}
-
-						score := calculateScoreBatch(c, pref, localRng)
-
-						recs = append(recs, Recommendation{
-							ContentID:       c.ID,
-							Title:           c.Title,
-							Genre:           c.Genre,
-							PopularityScore: c.PopularityScore,
-							Score:           score,
-						})
+						continue
 					}
 
-					sort.Slice(recs, func(i, j int) bool {
-						return recs[i].Score > recs[j].Score
+					sort.Slice(scored, func(i, j int) bool {
+						return scored[i].Score > scored[j].Score
 					})
 
-					if len(recs) > 10 {
-						recs = recs[:10]
+					if len(scored) > 10 {
+						scored = scored[:10]
+					}
+
+					recs := make([]Recommendation, 0, len(scored))
+					for _, s := range scored {
+						recs = append(recs, Recommendation{
+							ContentID:       s.Content.ID,
+							Title:           s.Content.Title,
+							Genre:           s.Content.Genre,
+							PopularityScore: s.Content.PopularityScore,
+							Score:           s.Score,
+						})
 					}
 
 					results <- BatchResult{
@@ -188,31 +192,4 @@ func (b *recommendationUsecase) GenerateBatch(ctx context.Context, page, limit i
 			GeneratedAt: time.Now().UTC().Format(time.RFC3339),
 		},
 	}, nil
-}
-
-func buildWatchedSet(history []user.WatchRecord) map[int64]struct{} {
-	set := make(map[int64]struct{})
-	for _, h := range history {
-		set[h.ContentID] = struct{}{}
-	}
-	return set
-}
-
-func calculateScoreBatch(c user.Content, pref map[string]float64, rng *rand.Rand) float64 {
-
-	popularity := c.PopularityScore * 0.4
-
-	genreWeight := 0.1
-	if v, ok := pref[c.Genre]; ok {
-		genreWeight = v
-	}
-	genreComponent := genreWeight * 0.35
-
-	days := time.Since(c.CreatedAt).Hours() / 24
-	recencyFactor := 1 / (1 + days/365)
-	recencyComponent := recencyFactor * 0.15
-
-	randomNoise := (rng.Float64()*0.1 - 0.05) * 0.1
-
-	return popularity + genreComponent + recencyComponent + randomNoise
 }
