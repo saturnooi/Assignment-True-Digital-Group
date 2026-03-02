@@ -11,11 +11,11 @@ export const options = {
   scenarios: {
     batch_load: {
       executor: 'constant-arrival-rate',
-      rate: 30,      
+      rate: 200,      
       timeUnit: '1s',
       duration: '2m',
       preAllocatedVUs: 30,
-      maxVUs: 200,
+      maxVUs: 300,
     },
   },
 

@@ -3,7 +3,7 @@ import { check } from 'k6'
 import { Rate, Trend } from 'k6/metrics'
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080'
-const MAX_USER = Number(__ENV.MAX_USER || 2001)
+const MAX_USER = Number(__ENV.MAX_USER || 2000)
 
 export const errorRate = new Rate('error_rate')
 export const singleLatency = new Trend('single_latency')
@@ -12,11 +12,11 @@ export const options = {
   scenarios: {
     single_load: {
       executor: 'constant-arrival-rate',
-      rate: 2000,     
+      rate: 200,     
       timeUnit: '1s',
       duration: '2m',
       preAllocatedVUs: 50,
-      maxVUs: 100,
+      maxVUs: 300,
     },
   },
 
