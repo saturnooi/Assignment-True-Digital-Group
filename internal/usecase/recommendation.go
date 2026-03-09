@@ -27,32 +27,10 @@ func NewRecommendationUsecase(r port.UserRepository, model port.ModelClient) Rec
 	}
 }
 
-type BatchResult struct {
-	UserID          int64                            `json:"user_id"`
-	Status          string                           `json:"status"`
-	Recommendations *GenerateRecommendationsResponse `json:"recommendations,omitempty"`
-	Error           string                           `json:"error,omitempty"`
-	Message         string                           `json:"message,omitempty"`
-}
-
-type BatchSummary struct {
-	SuccessCount     int   `json:"success_count"`
-	FailedCount      int   `json:"failed_count"`
-	ProcessingTimeMs int64 `json:"processing_time_ms"`
-}
-
-type BatchResponse struct {
-	Page       int           `json:"page"`
-	Limit      int           `json:"limit"`
-	TotalUsers int           `json:"total_users"`
-	Results    []BatchResult `json:"results"`
-	Summary    BatchSummary  `json:"summary"`
-	Metadata   struct {
-		GeneratedAt string `json:"generated_at"`
-	} `json:"metadata"`
-}
-
 func (b *recommendationUsecase) GenerateBatch(ctx context.Context, page, limit int) (*BatchResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
 	start := time.Now()
 
 	if page <= 0 {
@@ -65,6 +43,12 @@ func (b *recommendationUsecase) GenerateBatch(ctx context.Context, page, limit i
 	offset := (page - 1) * limit
 
 	userIDs, totalUsers, err := b.repo.GetUserIDsPaginated(ctx, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+
+	// Bulk-fetch user profiles, watch histories, and top content to avoid N+1 queries.
+	usersMap, err := b.repo.GetUsersByIDs(ctx, userIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -82,16 +66,14 @@ func (b *recommendationUsecase) GenerateBatch(ctx context.Context, page, limit i
 	workers := min(limit, runtime.NumCPU()*2)
 
 	jobs := make(chan int64)
-	results := make(chan BatchResult, len(userIDs))
+	resultsCh := make(chan BatchResult, len(userIDs))
 
 	var wg sync.WaitGroup
 
-	for i := 0; i < workers; i++ {
+	for range workers {
 		wg.Add(1)
-
 		go func() {
 			defer wg.Done()
-
 			for {
 				select {
 				case <-ctx.Done():
@@ -101,19 +83,25 @@ func (b *recommendationUsecase) GenerateBatch(ctx context.Context, page, limit i
 						return
 					}
 
+					user := usersMap[userID]
 					history := historyMap[userID]
 					pref := buildGenrePreference(history)
 
-					user := domain.User{ID: userID}
+					// Filter out content already watched by this user.
+					watchedIDs := make(map[int64]struct{}, len(history))
+					for _, h := range history {
+						watchedIDs[h.ContentID] = struct{}{}
+					}
+					filtered := make([]domain.Content, 0, len(candidates))
+					for _, c := range candidates {
+						if _, watched := watchedIDs[c.ID]; !watched {
+							filtered = append(filtered, c)
+						}
+					}
 
-					scored, err := b.model.ScoreCandidates(
-						user,
-						candidates,
-						pref,
-					)
-
+					scored, err := b.model.ScoreCandidates(user, filtered, pref)
 					if err != nil {
-						results <- BatchResult{
+						resultsCh <- BatchResult{
 							UserID:  userID,
 							Status:  "failed",
 							Error:   "model_unavailable",
@@ -141,13 +129,10 @@ func (b *recommendationUsecase) GenerateBatch(ctx context.Context, page, limit i
 						})
 					}
 
-					results <- BatchResult{
-						UserID: userID,
-						Status: "success",
-						Recommendations: &GenerateRecommendationsResponse{
-							UserID:          userID,
-							Recommendations: recs,
-						},
+					resultsCh <- BatchResult{
+						UserID:          userID,
+						Status:          "success",
+						Recommendations: recs,
 					}
 				}
 			}
@@ -160,14 +145,14 @@ func (b *recommendationUsecase) GenerateBatch(ctx context.Context, page, limit i
 		}
 		close(jobs)
 		wg.Wait()
-		close(results)
+		close(resultsCh)
 	}()
 
 	var batchResults []BatchResult
 	success := 0
 	failed := 0
 
-	for r := range results {
+	for r := range resultsCh {
 		batchResults = append(batchResults, r)
 		if r.Status == "success" {
 			success++
@@ -186,9 +171,7 @@ func (b *recommendationUsecase) GenerateBatch(ctx context.Context, page, limit i
 			FailedCount:      failed,
 			ProcessingTimeMs: time.Since(start).Milliseconds(),
 		},
-		Metadata: struct {
-			GeneratedAt string `json:"generated_at"`
-		}{
+		Metadata: BatchMetadata{
 			GeneratedAt: time.Now().UTC().Format(time.RFC3339),
 		},
 	}, nil

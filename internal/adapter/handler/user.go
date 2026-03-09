@@ -21,6 +21,7 @@ func InitUserHandler(e *echo.Echo, userUsecase usecase.UserUsecase) {
 
 	users := e.Group("/users")
 	users.GET("/:id/recommendations", h.GetRecommendations)
+	users.POST("/:id/watch-history", h.RecordWatchHistory)
 }
 
 func (h *userHandler) GetRecommendations(c echo.Context) error {
@@ -50,4 +51,24 @@ func (h *userHandler) GetRecommendations(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, resp)
+}
+
+func (h *userHandler) RecordWatchHistory(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		return httperr.BadRequest(codes.InvalidParameter, "Invalid user id")
+	}
+
+	var req struct {
+		ContentID int64 `json:"content_id"`
+	}
+	if err := c.Bind(&req); err != nil || req.ContentID <= 0 {
+		return httperr.BadRequest(codes.InvalidParameter, "Invalid content_id")
+	}
+
+	if err := h.userUsecase.RecordWatchHistory(c.Request().Context(), id, req.ContentID); err != nil {
+		return err
+	}
+
+	return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
 }

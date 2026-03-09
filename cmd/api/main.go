@@ -38,14 +38,13 @@ func main() {
 	e.HidePort = true
 
 	e.Use(echo.WrapMiddleware(pgctx.Middleware(db)))
-	e.Use(echo.WrapMiddleware(cache.Middleware(rc)))
-
 	e.Use(middleware.Recover())
 	e.HTTPErrorHandler = httpadapter.ErrorHandler
 
 	userRepo := repository.NewUserRepository()
 	modelClient := model.NewScoringClient()
-	userUsecase := usecase.NewUserUsecase(userRepo, modelClient)
+	cacheClient := cache.NewRedisCache(rc)
+	userUsecase := usecase.NewUserUsecase(userRepo, modelClient, cacheClient)
 	recommendationUsecase := usecase.NewRecommendationUsecase(userRepo, modelClient)
 
 	handler.InitUserHandler(e, userUsecase)

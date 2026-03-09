@@ -5,11 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/rand"
 	"sort"
 	"time"
 
-	"github.com/saturnooi/recommendation-service/internal/adapter/cache"
 	"github.com/saturnooi/recommendation-service/internal/domain"
 	"github.com/saturnooi/recommendation-service/internal/errors/codes"
 	"github.com/saturnooi/recommendation-service/internal/errors/httperr"
@@ -18,52 +16,33 @@ import (
 
 type UserUsecase interface {
 	GenerateRecommendations(ctx context.Context, id int64, limit int) (*GenerateRecommendationsResponse, error)
+	RecordWatchHistory(ctx context.Context, userID, contentID int64) error
 }
 
 type userUsecase struct {
 	repo  port.UserRepository
 	model port.ModelClient
-	rng   *rand.Rand
+	cache port.Cache
 }
 
-func NewUserUsecase(r port.UserRepository, model port.ModelClient) UserUsecase {
+func NewUserUsecase(r port.UserRepository, model port.ModelClient, cache port.Cache) UserUsecase {
 	return &userUsecase{
 		repo:  r,
 		model: model,
-		rng:   rand.New(rand.NewSource(time.Now().UnixNano())),
+		cache: cache,
 	}
 }
 
-type Recommendation struct {
-	ContentID       int64   `json:"content_id"`
-	Title           string  `json:"title"`
-	Genre           string  `json:"genre"`
-	PopularityScore float64 `json:"popularity_score"`
-	Score           float64 `json:"score"`
-}
-
-type Metadata struct {
-	CacheHit    bool   `json:"cache_hit"`
-	GeneratedAt string `json:"generated_at"`
-	TotalCount  int    `json:"total_count"`
-}
-
-type GenerateRecommendationsResponse struct {
-	UserID          int64            `json:"user_id"`
-	Recommendations []Recommendation `json:"recommendations"`
-	Metadata        Metadata         `json:"metadata"`
-}
-
 func (u *userUsecase) GenerateRecommendations(ctx context.Context, id int64, limit int) (*GenerateRecommendationsResponse, error) {
-	ctx, cancel := context.WithTimeout(ctx, 300*time.Millisecond)
+	ctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
 	defer cancel()
 
 	if limit <= 0 || limit > 50 {
 		limit = 10
 	}
 
-	cacheKey := fmt.Sprintf("recommendation:%d:%d", id, limit)
-	if val, err := cache.Get(ctx, cacheKey); err == nil {
+	cacheKey := fmt.Sprintf("rec:user:%d:limit:%d", id, limit)
+	if val, err := u.cache.Get(ctx, cacheKey); err == nil {
 		var cached GenerateRecommendationsResponse
 		if err := json.Unmarshal([]byte(val), &cached); err == nil {
 			cached.Metadata.CacheHit = true
@@ -141,9 +120,17 @@ func (u *userUsecase) GenerateRecommendations(ctx context.Context, id int64, lim
 	}
 
 	b, _ := json.Marshal(response)
+	u.cache.Set(ctx, cacheKey, b, 10*time.Minute)
 
-	cache.Set(ctx, cacheKey, b, 10*time.Minute)
 	return &response, nil
+}
+
+func (u *userUsecase) RecordWatchHistory(ctx context.Context, userID, contentID int64) error {
+	if err := u.repo.RecordWatch(ctx, userID, contentID); err != nil {
+		return err
+	}
+	pattern := fmt.Sprintf("rec:user:%d:limit:*", userID)
+	return u.cache.DelPattern(ctx, pattern)
 }
 
 func buildGenrePreference(history []domain.WatchRecord) map[string]float64 {

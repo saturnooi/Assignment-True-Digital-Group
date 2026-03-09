@@ -35,8 +35,13 @@ func (s *ScoringClient) ScoreCandidates(user domain.User, candidates []domain.Co
 		daysSinceCreation := now.Sub(content.CreatedAt).Hours() / 24
 		recencyFactor := 1.0 / (1.0 + daysSinceCreation/365.0)
 
+		genrePref := genrePreferences[content.Genre]
+		if genrePref == 0 {
+			genrePref = 0.1
+		}
+
 		popularityComponent := content.PopularityScore * 0.4
-		genreBoost := genrePreferences[content.Genre] * 0.35
+		genreBoost := genrePref * 0.35
 		recencyComponent := recencyFactor * 0.15
 		randomNoise := (rand.Float64()*0.1 - 0.05) * 0.1
 

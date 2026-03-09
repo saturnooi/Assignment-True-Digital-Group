@@ -50,6 +50,31 @@ func (r *userRepo) GetUserByID(ctx context.Context, id int64) (*domain.User, err
 	return &result, err
 }
 
+func (r *userRepo) GetUsersByIDs(ctx context.Context, ids []int64) (map[int64]domain.User, error) {
+	if len(ids) == 0 {
+		return map[int64]domain.User{}, nil
+	}
+
+	results := make(map[int64]domain.User, len(ids))
+
+	err := pgctx.Iter(ctx, func(scan pgsql.Scanner) error {
+		var u domain.User
+		if err := scan(&u.ID, &u.Age, &u.Country, &u.Subscription); err != nil {
+			return err
+		}
+		results[u.ID] = u
+		return nil
+	},
+		`SELECT id, age, country, subscription_type FROM users WHERE id = ANY($1)`,
+		pq.Array(ids),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return results, nil
+}
+
 func (r *userRepo) GetUserWatchHistory(ctx context.Context, id int64) ([]domain.WatchRecord, error) {
 	var results []domain.WatchRecord
 
@@ -58,6 +83,7 @@ func (r *userRepo) GetUserWatchHistory(ctx context.Context, id int64) ([]domain.
 		func(scan pgsql.Scanner) error {
 			var x domain.WatchRecord
 			err := scan(
+				&x.ContentID,
 				&x.Genre,
 				&x.WatchedAt,
 			)
@@ -67,18 +93,19 @@ func (r *userRepo) GetUserWatchHistory(ctx context.Context, id int64) ([]domain.
 			results = append(results, x)
 			return nil
 		},
-		`SELECT 
-			c.genre, 
+		`SELECT
+			c.id,
+			c.genre,
 			uwh.watched_at
-		FROM 
+		FROM
 			user_watch_history uwh
-		JOIN 
+		JOIN
 			content c ON c.id = uwh.content_id
-		WHERE 
+		WHERE
 			uwh.user_id=$1
-		ORDER BY 
+		ORDER BY
 			uwh.watched_at DESC
-		LIMIT 
+		LIMIT
 			50`,
 		id,
 	)
@@ -219,6 +246,14 @@ func (r *userRepo) GetWatchHistoryByUserIDs(ctx context.Context, userIDs []int64
 	}
 
 	return results, nil
+}
+
+func (r *userRepo) RecordWatch(ctx context.Context, userID, contentID int64) error {
+	_, err := pgctx.Exec(ctx,
+		`INSERT INTO user_watch_history(user_id, content_id) VALUES($1, $2)`,
+		userID, contentID,
+	)
+	return err
 }
 
 func (r *userRepo) GetTopContent(ctx context.Context) ([]domain.Content, error) {

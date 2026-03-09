@@ -43,6 +43,9 @@ export default function () {
 
   const success = check(res, {
     'status 200': (r) => r.status === 200,
+    'has recommendations': (r) => {
+      try { return JSON.parse(r.body).recommendations.length > 0 } catch { return false }
+    },
   })
 
   errorRate.add(!success)
